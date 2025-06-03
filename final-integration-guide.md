@@ -125,8 +125,10 @@ A client in Keycloak is an entity that can request authentication of a user. In 
     *   **Standard Flow Enabled:** Ensure this is ON (usually default).
     *   **Direct Access Grants Enabled:** Ensure this is ON (usually default).
     *   **Valid Redirect URIs:** This is a critical setting. It's a list of URLs where Keycloak is allowed to redirect the user after successful authentication.
-        *   Add `http://<your_openwebui_ip_or_domain>:<port>/oauth/oidc/callback`
-        *   You might also need to add `http://<your_openwebui_ip_or_domain>:<port>/*` or `http://<your_openwebui_ip_or_domain>:<port>` for logout or if you encounter redirect issues. Start with the callback URI.
+        *   The `Valid Redirect URIs` (e.g., `http://<your_openwebui_host_or_ip>:<port>/auth/callback` or `http://<your_openwebui_host_or_ip>:<port>/oauth/oidc/callback`) must exactly match what OpenWebUI uses.
+        *   When using `OLLAMA_AUTH_PROVIDER=keycloak` (as described in Part 3), this URI might be specific (e.g., often ending in `/auth/callback` or similar, but this can vary).
+        *   **If unsure of the exact URI, you can often determine the correct one by attempting an initial login from OpenWebUI after configuring it for Keycloak. When OpenWebUI redirects you to the Keycloak login page, inspect the `redirect_uri` query parameter in your browser's address bar. This URL is what Keycloak expects. Add this discovered URI to the list of Valid Redirect URIs in Keycloak.**
+        *   You might also need to add your OpenWebUI base URL (e.g., `http://<your_openwebui_ip_or_domain>:<port>/*`) for features like logout.
         *   **Important:** Replace `<your_openwebui_ip_or_domain>` with the actual IP address or domain name where OpenWebUI is accessible, and `<port>` with the port OpenWebUI is running on (e.g., `3000` or `80`).
     *   **Web Origins:** You might need to add `+` to allow all origins or specify `http://<your_openwebui_ip_or_domain>:<port>`. This helps with CORS.
 
@@ -135,7 +137,7 @@ A client in Keycloak is an entity that can request authentication of a user. In 
 9.  **Retrieve Client Secret:**
     *   Navigate to the **Credentials** tab for the `openwebui-client`.
     *   You will see a field labeled **Secret**. Copy this value.
-    *   **This secret is crucial and will be used as `OIDC_CLIENT_SECRET` in OpenWebUI's environment variable configuration.** Keep it secure.
+    *   **This secret is crucial and will be used in OpenWebUI's environment variable configuration (e.g., as `OLLAMA_AUTH_KEYCLOAK_CLIENT_SECRET` as per Part 3).** Keep it secure.
 
 ### 2.3 Step 3: Configure Mappers for Group Information
 
@@ -145,7 +147,7 @@ To allow OpenWebUI (and potentially a rate-limiting proxy) to make decisions bas
 2.  Click **Create**.
 3.  **Name:** Give the mapper a descriptive name, e.g., `groups-mapper` or simply `groups`.
 4.  **Mapper Type:** Select `Group Membership` from the dropdown.
-5.  **Token Claim Name:** Enter `groups`. This is the name of the claim that will appear in the JWT token containing the user's group memberships. OpenWebUI will look for this claim (configurable via `OAUTH_GROUP_CLAIM` in OpenWebUI, defaults to `groups`).
+5.  **Token Claim Name:** Enter `groups`. This is the name of the claim that will appear in the JWT token containing the user's group memberships. The rate-limiting proxy will use this claim. OpenWebUI might also use it if configured (e.g., via `OLLAMA_AUTH_KEYCLOAK_GROUP_CLAIM`).
 6.  **Full group path:** Set this to **OFF**. Typically, only the group name is needed, not its entire path in the group hierarchy.
 7.  **Add to ID token:** Set to **ON**.
 8.  **Add to access token:** Set to **ON**. (While OpenWebUI primarily uses the ID token for this, including it in the access token is good practice if other services consume it).
@@ -193,93 +195,48 @@ This completes the Keycloak configuration for OpenWebUI. Remember to replace pla
 
 ## Part 3: Configuring OpenWebUI for Keycloak Integration
 
-To integrate OpenWebUI with your Keycloak OIDC setup, you need to configure several environment variables in your OpenWebUI Docker deployment. These variables tell OpenWebUI how to communicate with Keycloak for authentication.
+To integrate OpenWebUI with your Keycloak setup, you need to configure several environment variables in your OpenWebUI Docker deployment. These variables tell OpenWebUI how to communicate with Keycloak for authentication, assuming OpenWebUI uses a Keycloak-specific set of environment variables when `OLLAMA_AUTH_PROVIDER=keycloak` is set.
 
 Refer to your `docker run` command or `docker-compose.yml` file to set these variables.
 
-### 3.1 Required OIDC Environment Variables
+**Important Note on Redirect URI:**
+When using `OLLAMA_AUTH_PROVIDER=keycloak`, the exact redirect URI that OpenWebUI will use needs to be configured in your Keycloak client settings under 'Valid Redirect URIs'. This is often `http://<your_openwebui_host_or_ip>:<port>/auth/callback` or similar (the exact path `/auth/callback` may vary depending on OpenWebUI's implementation for this provider). Please verify this by checking the initial redirection URL from OpenWebUI to Keycloak during the first login attempt if the documentation for this auth provider isn't explicit about the callback path. Update the "Valid Redirect URIs" in Keycloak (Part 2, Step 2.2) accordingly.
 
-Here's a list of essential environment variables and their explanations:
+### 3.1 Required Keycloak Environment Variables for OpenWebUI
 
-*   **`ENABLE_OAUTH_SIGNUP=True`**
-    *   **Explanation:** Enables user account creation through the OIDC provider (Keycloak). If a new user logs in via Keycloak and doesn't have an account in OpenWebUI, one will be created for them.
-    *   **Default:** `False`
+Here's a list of essential environment variables based on the `OLLAMA_AUTH_PROVIDER=keycloak` pattern:
 
-*   **`ENABLE_LOGIN_FORM=False`**
-    *   **Explanation:** Disables OpenWebUI's built-in email/password login form. This is crucial when OIDC is intended to be the sole authentication method.
-    *   **Warning:** As per OpenWebUI documentation, `ENABLE_LOGIN_FORM` must be set to `False` when `ENABLE_OAUTH_SIGNUP` is `True`. Failure to do so will result in the inability to log in.
-    *   **Default:** `True`
+*   **`OLLAMA_AUTH_PROVIDER=keycloak`**
+    *   **Explanation:** Specifies Keycloak as the authentication provider for OpenWebUI.
 
-*   **`OAUTH_CLIENT_ID=<your_openwebui_client_id_from_keycloak>`**
+*   **`OLLAMA_AUTH_KEYCLOAK_URL=http://<keycloak_host_or_ip>:<keycloak_port>/realms/<your_realm_name>`**
+    *   **Explanation:** The full URL to your Keycloak realm. This is often referred to as the "Issuer URL".
+    *   **Example:** `http://localhost:8080/realms/OpenWebUI_Realm` (if Keycloak is on localhost, port 8080, and realm is `OpenWebUI_Realm`).
+    *   **Placeholders:** Replace `<keycloak_host_or_ip>`, `<keycloak_port>`, and `<your_realm_name>` with your actual values.
+
+*   **`OLLAMA_AUTH_KEYCLOAK_CLIENT_ID=<openwebui-client_id_from_keycloak>`**
     *   **Explanation:** The Client ID of the client you created in Keycloak for OpenWebUI.
-    *   **Example:** `openwebui-client` (if you used the example name from the Keycloak setup guide).
-    *   **Placeholder:** Replace `<your_openwebui_client_id_from_keycloak>` with your actual Client ID.
+    *   **Example:** `openwebui-client` (if you used this name during Keycloak client setup).
+    *   **Placeholder:** Replace `<openwebui-client_id_from_keycloak>` with your actual Client ID.
 
-*   **`OAUTH_CLIENT_SECRET=<your_client_secret_from_keycloak>`**
+*   **`OLLAMA_AUTH_KEYCLOAK_CLIENT_SECRET=<your_client_secret_from_keycloak>`**
     *   **Explanation:** The client secret obtained from the 'Credentials' tab of your `openwebui-client` in Keycloak.
     *   **Placeholder:** Replace `<your_client_secret_from_keycloak>` with your actual client secret.
 
-*   **`OPENID_PROVIDER_URL=http://<keycloak_ip>:<keycloak_port>/realms/<your_realm_name>`**
-    *   **Explanation:** The full URL to your Keycloak realm's OpenID configuration. This is often referred to as the "Issuer URL". OpenWebUI uses this to discover OIDC endpoints.
-    *   **Example:** `http://localhost:8180/realms/OpenWebUI_Realm` (if Keycloak is on localhost, port 8180, and realm is `OpenWebUI_Realm`).
-    *   **Placeholders:**
-        *   `<keycloak_ip>`: IP address or domain of your Keycloak server.
-        *   `<keycloak_port>`: Port your Keycloak server is running on.
-        *   `<your_realm_name>`: The name of the realm you created in Keycloak (e.g., `OpenWebUI_Realm`).
+*   **(Optional) `OLLAMA_AUTH_KEYCLOAK_GROUP_CLAIM=groups`**
+    *   **Explanation:** If OpenWebUI has specific features to utilize Keycloak group claims directly (beyond what the external proxy handles for rate limiting), specify the name of the group claim in the JWT token (e.g., `groups`). This must match the 'Token Claim Name' of your group mapper in Keycloak (configured in Part 2, Step 2.3). For the primary goal of rate limiting via an external proxy, this claim will be read by the proxy.
+    *   **Default:** If not set, OpenWebUI might not use group claims directly, or it might have a default value.
 
-*   **`OPENID_REDIRECT_URI=http://<openwebui_ip_or_domain>:<openwebui_port>/oauth/oidc/callback`**
-    *   **Explanation:** The exact URL where Keycloak should redirect the user after successful authentication. This **must** match one of the "Valid Redirect URIs" configured in your Keycloak client.
-    *   **Example:** `http://localhost:3000/oauth/oidc/callback` (if OpenWebUI is accessible at `localhost:3000`).
-    *   **Placeholders:**
-        *   `<openwebui_ip_or_domain>`: The IP address or domain name where your OpenWebUI instance is accessible.
-        *   `<openwebui_port>`: The port on which your OpenWebUI instance is running.
-    *   **Default (from docs):** `<backend>/oauth/oidc/callback` (OpenWebUI replaces `<backend>` internally, ensure your external URL matches this structure).
-
-*   **`OAUTH_SCOPES="openid email profile groups"`**
-    *   **Explanation:** Specifies the scopes OpenWebUI should request from Keycloak.
-        *   `openid`: Standard scope for OIDC.
-        *   `email`: To get the user's email address.
-        *   `profile`: To get user profile information like name.
-        *   `groups`: Essential for fetching group membership information, which will be used by the rate-limiting proxy and potentially OpenWebUI itself. This must align with the "Token Claim Name" of your 'groups' mapper in Keycloak.
-    *   **Default (from docs):** `openid email profile` (you **must** add `groups`).
-
-*   **`OAUTH_USERNAME_CLAIM=preferred_username`**
-    *   **Explanation:** The OIDC token claim that Keycloak uses for the username. `preferred_username` is a standard claim often containing the login name.
-    *   **Default (from docs):** `name`. For Keycloak, `preferred_username` is typically more appropriate for the unique login username. `name` might be the full display name. Adjust if your Keycloak token provides username differently.
-
-*   **`OAUTH_EMAIL_CLAIM=email`**
-    *   **Explanation:** The OIDC token claim for the user's email address. `email` is standard.
-    *   **Default:** `email`
-
-*   **`OAUTH_GROUP_CLAIM=groups`**
-    *   **Explanation:** The name of the claim in the OIDC token that contains the user's group memberships. This **must** match the "Token Claim Name" you configured for the `Group Membership` mapper in Keycloak (e.g., `groups`).
-    *   **Default:** `groups`
-
-*   **`ENABLE_OAUTH_GROUP_MANAGEMENT=True`**
-    *   **Explanation:** This variable suggests that OpenWebUI can utilize group information from the OIDC token. While our primary group-based logic (rate limiting) will be handled by an external proxy, enabling this might offer additional group-related features within OpenWebUI itself or simplify user role mapping if OpenWebUI supports it directly based on OIDC groups.
-    *   **Default (from docs):** `False`
+*   **User Signup and Login Form Behavior Note:**
+    *   The variables `ENABLE_OAUTH_SIGNUP=True` and `ENABLE_LOGIN_FORM=False` were relevant for the generic OIDC configuration. When `OLLAMA_AUTH_PROVIDER=keycloak` is used, OpenWebUI's behavior regarding user registration and the visibility of its native login form might change.
+    *   **Verification Needed:** It's crucial to test whether new users from Keycloak can be automatically provisioned in OpenWebUI and whether the local login form is appropriately hidden. If OpenWebUI's documentation for the `keycloak` provider specifies different variables for these controls (e.g., a general `ENABLE_SIGNUP`), use those. If users are expected to be pre-provisioned in OpenWebUI, then `ENABLE_SIGNUP` (or its equivalent) should be `False`. The goal is typically to have Keycloak as the sole point of entry.
 
 *   **`WEBUI_SECRET_KEY=<your_strong_random_secret_key>`**
-    *   **Explanation:** An essential security key used by OpenWebUI for signing session cookies and other security-related functions. It should be a long, random, and unpredictable string.
+    *   **Explanation:** An essential security key used by OpenWebUI for signing session cookies and other security-related functions. It should be a long, random, and unpredictable string. This is independent of Keycloak but vital for OpenWebUI's overall security.
     *   **Recommendation:** Generate a strong random string (e.g., using a password manager or `openssl rand -hex 32`).
     *   **Default (Docker):** Randomly generated on first start. **Important:** For consistent behavior across restarts or in multi-container setups, set this explicitly.
 
-### 3.2 Optional OIDC Environment Variables
-
-*   **`OAUTH_PROVIDER_NAME="Login with Keycloak"`**
-    *   **Explanation:** Customizes the text displayed on the OIDC login button on the OpenWebUI login page.
-    *   **Default:** `SSO`
-    *   **Example:** You could set it to "Login with Company SSO" or "Keycloak".
-
-*   **`OAUTH_PICTURE_CLAIM=picture`**
-    *   **Explanation:** The OIDC token claim for the user's profile picture URL. `picture` is a standard claim.
-    *   **Default:** `picture`
-
-*   **`OAUTH_UPDATE_PICTURE_ON_LOGIN=True`**
-    *   **Explanation:** If enabled, OpenWebUI will update the user's profile picture with the one provided by Keycloak upon each login.
-    *   **Default:** `False`
-
-### 3.3 Verifying the Keycloak Connection
+### 3.2 Verifying the Keycloak Connection
 
 After configuring these environment variables and restarting your OpenWebUI container:
 
@@ -289,17 +246,17 @@ After configuring these environment variables and restarting your OpenWebUI cont
 
 2.  **Access OpenWebUI:** Open your OpenWebUI URL (e.g., `http://<openwebui_ip_or_domain>:<openwebui_port>`) in a web browser.
 
-3.  **Redirection to Keycloak:** You should be automatically redirected to the Keycloak login page. The `ENABLE_LOGIN_FORM=False` setting ensures the standard OpenWebUI login form is hidden.
+3.  **Redirection to Keycloak:** You should be automatically redirected to the Keycloak login page. Verify if OpenWebUI's native login form is hidden as expected (behavior might depend on how `OLLAMA_AUTH_PROVIDER=keycloak` interacts with form visibility).
 
 4.  **Keycloak Login:** Log in with a user account that exists in your Keycloak realm (and is assigned to relevant groups if testing group functionality).
 
 5.  **Redirection back to OpenWebUI:** After successful authentication with Keycloak, you should be redirected back to the OpenWebUI interface, and you should be logged in as the Keycloak user.
 
 6.  **Troubleshooting (Optional):**
-    *   If the login fails or you encounter issues, check the OpenWebUI container logs for any OIDC-related error messages: `docker logs open-webui`
-    *   Double-check that all URLs (`OPENID_PROVIDER_URL`, `OPENID_REDIRECT_URI`) are correct and accessible from the OpenWebUI container and your browser, respectively.
+    *   If the login fails or you encounter issues, check the OpenWebUI container logs for any auth-related error messages: `docker logs open-webui`.
+    *   Double-check that the `OLLAMA_AUTH_KEYCLOAK_URL` is correct and accessible from the OpenWebUI container.
     *   Verify that the Client ID and Secret are correctly copied.
-    *   Ensure the "Valid Redirect URIs" in Keycloak exactly matches the `OPENID_REDIRECT_URI` value.
+    *   Ensure the "Valid Redirect URIs" in Keycloak correctly matches the URI OpenWebUI is attempting to redirect to after Keycloak authentication (see note at the beginning of Part 3).
 
 By correctly setting these environment variables, you can effectively delegate OpenWebUI's authentication to Keycloak.
 
